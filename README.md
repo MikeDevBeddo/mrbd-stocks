@@ -8,6 +8,42 @@ remove symbols — with no text field, because the runtime has none.
 
 ---
 
+## ▸ Open it on your glasses
+
+<table>
+<tr>
+<td width="220" valign="middle">
+<img src="qr-deeplink.png" width="200" alt="QR code opening the Stocks web app on Meta Ray-Ban Display">
+</td>
+<td valign="middle">
+
+**Scan this from the phone paired with your glasses.**
+
+Live app — **https://mikedevbeddo.github.io/mrbd-stocks/**
+
+The QR encodes the Web App deep link:
+
+```
+fb-viewapp://web_app_deep_link?appName=Stocks&appUrl=https%3A%2F%2Fmikedevbeddo.github.io%2Fmrbd-stocks%2F
+```
+
+Requires glasses v125+ and Meta AI app v272+.
+Regenerate after redeploying elsewhere:
+
+```bash
+npx qrcode -o qr-deeplink.png -w 512 \
+  "fb-viewapp://web_app_deep_link?appName=Stocks&appUrl=$(node -p 'encodeURIComponent("https://YOUR-URL/")')"
+```
+
+</td>
+</tr>
+</table>
+
+No glasses to hand? Open `/simulator.html` — a 600 × 600 lens with additive blending and an
+on-screen D-pad. [Jump to Run it](#run-it).
+
+---
+
 ## How you build for these glasses today
 
 Meta shipped display access to third parties in **May 2026**, adding display capabilities to the
@@ -102,15 +138,19 @@ npm start                       # http://localhost:3001  (PORT=4173 npm start to
   and gives you an on-screen D-pad. Real arrow keys are forwarded in. Toggle the world off to
   judge contrast against pure black.
 
-## Put it on the glasses
+## Deploy your own copy
 
-1. Deploy anywhere with valid TLS (GitHub Pages, Vercel, Netlify, Cloudflare Pages).
-   The app is fully static; `server.js` is only for local dev.
-2. Open it on device with the Web App deep link:
-   ```
-   fb-viewapp://web_app_deep_link?appName=Stocks&appUrl=<url-encoded-https-url>
-   ```
-   Encode it as a QR code and scan it from the phone paired with the glasses.
+The app is fully static — `server.js` is only for local dev — so any host with valid TLS works
+(GitHub Pages, Vercel, Netlify, Cloudflare Pages). **HTTP-only URLs are rejected by the glasses.**
+
+This copy is published from `main` at the repo root:
+
+```bash
+gh repo create mrbd-stocks --public --source=. --push
+gh api -X POST repos/:owner/mrbd-stocks/pages -f "source[branch]=main" -f "source[path]=/"
+```
+
+Then regenerate the QR for your URL with the command in the [box at the top](#-open-it-on-your-glasses).
 
 ## Regenerate the icon
 
