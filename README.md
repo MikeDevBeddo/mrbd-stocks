@@ -114,6 +114,10 @@ The last remaining stock cannot be removed.
 `▲` from the top result returns to the rail, `Enter` on a result adds it and returns to the
 watchlist with the new stock selected.
 
+A new stock is **prepended**, so it lands at the top of the watchlist and one press below
+**＋ Add Stock** in the edit list — appending buried it at the foot of a scrolling list where its
+Remove row was awkward to reach.
+
 Watchlist contents, range, and cursor position persist to `localStorage`.
 
 ---
@@ -179,6 +183,22 @@ Brownian-bridge intraday path for the current day. Seeded from the ticker, so a 
 draws the identical chart, and every range is sliced from one shared series — 1D, 1M and 5Y stay
 mutually consistent. Symbols outside the curated anchors derive their parameters from their own
 seed, which is why any of the 6,400 fetched symbols charts immediately.
+
+For those derived symbols, **Mkt Cap and P/E render as `—` rather than a number.** An invented
+chart under a DEMO badge is the point of the demo; an invented market cap reads as a fact, and a
+seeded guess lands nowhere near reality (NBIS came out at 274 B against an actual ~45 B).
+
+Validated against NBIS (Nebius Group N.V.) with real Yahoo Finance data as ground truth:
+
+| | app (demo) | actual |
+|---|---|---|
+| Price | 146.87 | 189.88 |
+| 52-week range | 85.32 – 163.25 | 62.01 – 299.86 |
+| 1M change | −7.82 % | −2.72 % |
+
+Structurally sound — one price across all six ranges, `Low ≤ price ≤ High`,
+`52W L ≤ price ≤ 52W H`, no gaps or `NaN` — and factually fiction. That is the demo provider
+working as designed, not a bug.
 
 To switch to live prices, edit `CONFIG` at the top of `app.js`:
 

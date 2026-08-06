@@ -221,6 +221,10 @@
     metaCache[symbol] = {
       symbol: e.s,
       name: e.n,
+      /* No curated anchor -> every number below is invented. A made-up chart
+         under a DEMO badge is the point of the demo; a made-up market cap
+         reads as a fact, so those are withheld rather than guessed. */
+      derived: e.p === undefined,
       price:  e.p  === undefined ? Math.round((18 + r() * 520) * 100) / 100 : e.p,
       vol:    e.v  === undefined ? 0.18 + r() * 0.34 : e.v,
       drift:  e.d  === undefined ? -0.04 + r() * 0.38 : e.d,
@@ -542,8 +546,8 @@
       ['52W H',   fmtPrice(hi)],
       ['Low',     fmtPrice(bar.l)],
       ['52W L',   fmtPrice(lo)],
-      ['Mkt Cap', m.shares ? fmtCompact(m.shares * q.price) : '—'],
-      ['P/E',     m.pe ? m.pe.toFixed(1) : '—']
+      ['Mkt Cap', (!m.derived && m.shares) ? fmtCompact(m.shares * q.price) : '—'],
+      ['P/E',     (!m.derived && m.pe) ? m.pe.toFixed(1) : '—']
     ];
 
     el.stats.innerHTML = cells.map(function (c) {
@@ -831,7 +835,9 @@
       showToast(symbol + ' is already in your list');
       return;
     }
-    state.watchlist.push(symbol);
+    // Prepend, not append: a stock added to the foot of a scrolling list is
+    // easy to lose track of, and its Remove row ends up equally buried.
+    state.watchlist.unshift(symbol);
     state.selected = symbol;
     persist();
     buildRows();
