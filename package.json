@@ -5,7 +5,8 @@
   "description": "Stocks watchlist web app for Meta Ray-Ban Display glasses",
   "scripts": {
     "start": "node server.js",
-    "icon": "node scripts/make-icon.js"
+    "icon": "node scripts/make-icon.js",
+    "qr": "node scripts/make-qr.js"
   },
   "engines": {
     "node": ">=18"

@@ -10,14 +10,9 @@ remove symbols — with no text field, because the runtime has none.
 
 ## ▸ Open it on your glasses
 
-<table>
-<tr>
-<td width="220" valign="middle">
-<img src="qr-deeplink.png" width="200" alt="QR code opening the Stocks web app on Meta Ray-Ban Display">
-</td>
-<td valign="middle">
+**Scan this from the phone paired with your glasses:**
 
-**Scan this from the phone paired with your glasses.**
+![QR code opening the Stocks web app on Meta Ray-Ban Display](qr-deeplink.png)
 
 Live app — **https://mikedevbeddo.github.io/mrbd-stocks/**
 
@@ -27,17 +22,14 @@ The QR encodes the Web App deep link:
 fb-viewapp://web_app_deep_link?appName=Stocks&appUrl=https%3A%2F%2Fmikedevbeddo.github.io%2Fmrbd-stocks%2F
 ```
 
-Requires glasses v125+ and Meta AI app v272+.
-Regenerate after redeploying elsewhere:
+Requires glasses v125+ and Meta AI app v272+. Regenerate the QR after redeploying elsewhere:
 
 ```bash
-npx qrcode -o qr-deeplink.png -w 512 \
-  "fb-viewapp://web_app_deep_link?appName=Stocks&appUrl=$(node -p 'encodeURIComponent("https://YOUR-URL/")')"
+npm run qr -- https://your-url/ "Stocks"
 ```
 
-</td>
-</tr>
-</table>
+(The `qrcode` CLI emits a QR whose light modules are fully transparent — invisible on any
+dark background. `scripts/make-qr.js` flattens it onto opaque white before writing the PNG.)
 
 No glasses to hand? Open `/simulator.html` — a 600 × 600 lens with additive blending and an
 on-screen D-pad. [Jump to Run it](#run-it).
