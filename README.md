@@ -93,7 +93,33 @@ screen therefore has an exit that is a cursor target reachable with arrows and `
 |---|---|
 | `▲` `▼` | Move the cursor through the list |
 | `◀` `▶` | Cycle the range: 1D · 1W · 1M · 6M · 1Y · 5Y — **every sparkline and badge follows** |
-| `Enter` | Open the focused stock's detail screen, or **Edit List** at the foot |
+| `Enter` | Open the focused stock's detail, or **Market** / **Edit List** at the foot |
+
+### Markets
+
+Four exchanges, each with its own watchlist, all served by the same Yahoo adapter through the
+ticker suffix (`.L`, `.HK`, `.T`):
+
+| | Session (local) | Zone |
+|---|---|---|
+| US | 09:30 – 16:00 | America/New_York |
+| London | 08:00 – 16:30 | Europe/London |
+| Hong Kong | 09:30 – 16:00 | Asia/Hong_Kong |
+| Tokyo | 09:00 – 15:30 | Asia/Tokyo |
+
+The header's top right names the active exchange and its local clock, green while it is trading.
+The **Market** row at the foot of the watchlist opens the picker, which shows every exchange's
+local time and whether it is open; when another market is trading the row says so inline.
+
+At startup, if the remembered exchange is shut and another is open, the app switches to the open
+one — only then, never mid-session, so a list is not yanked out from under you. Adding or
+removing a stock affects the active market's list alone.
+
+**Holidays are not modelled** — an exchange closed for a public holiday still reads as open.
+Tokyo's lunch break (11:30–12:30) is also ignored.
+
+London quotes in **GBp — pence**, so `11,850.00` is £118.50. The detail screen's Exchange cell
+shows the currency for exactly this reason.
 
 ### Detail
 

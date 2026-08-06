@@ -124,7 +124,47 @@
     { s: 'TMUS',  n: 'T-Mobile US' }
   ];
 
-  var DEFAULT_WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'META', 'SPY'];
+  /* Trading sessions in local exchange time. Yahoo carries every one of these
+     under a ticker suffix, so the same adapter serves all of them.
+     Holidays are NOT modelled — an exchange shut for a public holiday still
+     reads as open here. */
+  var MARKETS = [
+    { id: 'US',  label: 'US',        tz: 'America/New_York', open: 9 * 60 + 30, close: 16 * 60 },
+    { id: 'LSE', label: 'London',    tz: 'Europe/London',    open: 8 * 60,      close: 16 * 60 + 30 },
+    { id: 'HKG', label: 'Hong Kong', tz: 'Asia/Hong_Kong',   open: 9 * 60 + 30, close: 16 * 60 },
+    { id: 'TYO', label: 'Tokyo',     tz: 'Asia/Tokyo',       open: 9 * 60,      close: 15 * 60 + 30 }
+  ];
+
+  var MARKET_SYMBOLS = {
+    US: [
+      { s: 'AAPL', n: 'Apple Inc.' }, { s: 'MSFT', n: 'Microsoft Corporation' },
+      { s: 'NVDA', n: 'NVIDIA Corporation' }, { s: 'GOOGL', n: 'Alphabet Inc.' },
+      { s: 'AMZN', n: 'Amazon.com, Inc.' }, { s: 'TSLA', n: 'Tesla, Inc.' },
+      { s: 'META', n: 'Meta Platforms, Inc.' }, { s: 'SPY', n: 'SPDR S&P 500 ETF Trust' }
+    ],
+    LSE: [
+      { s: 'AZN.L',  n: 'AstraZeneca PLC' },      { s: 'SHEL.L', n: 'Shell PLC' },
+      { s: 'HSBA.L', n: 'HSBC Holdings PLC' },    { s: 'ULVR.L', n: 'Unilever PLC' },
+      { s: 'BP.L',   n: 'BP PLC' },               { s: 'RIO.L',  n: 'Rio Tinto PLC' },
+      { s: 'GSK.L',  n: 'GSK PLC' },              { s: 'VOD.L',  n: 'Vodafone Group PLC' }
+    ],
+    HKG: [
+      { s: '0700.HK', n: 'Tencent Holdings' },    { s: '9988.HK', n: 'Alibaba Group' },
+      { s: '0005.HK', n: 'HSBC Holdings' },       { s: '1299.HK', n: 'AIA Group' },
+      { s: '3690.HK', n: 'Meituan' },             { s: '0941.HK', n: 'China Mobile' },
+      { s: '1810.HK', n: 'Xiaomi Corporation' },  { s: '2318.HK', n: 'Ping An Insurance' }
+    ],
+    TYO: [
+      { s: '7203.T', n: 'Toyota Motor Corp.' },   { s: '6758.T', n: 'Sony Group Corp.' },
+      { s: '9984.T', n: 'SoftBank Group Corp.' }, { s: '8306.T', n: 'Mitsubishi UFJ Financial' },
+      { s: '6861.T', n: 'Keyence Corp.' },        { s: '9432.T', n: 'Nippon Telegraph & Telephone' },
+      { s: '7974.T', n: 'Nintendo Co., Ltd.' },   { s: '6501.T', n: 'Hitachi, Ltd.' }
+    ]
+  };
+
+  function defaultsFor(marketId) {
+    return MARKET_SYMBOLS[marketId].map(function (e) { return e.s; });
+  }
 
   var RANGES = [
     { id: '1D', bars: 0,    live: ['5min',  78],  yahoo: ['1d',  '5m']  },  // bars 0 -> intraday
@@ -146,12 +186,25 @@
   var state = {
     screen: 'watchlist',
     rangeIndex: 2,                       // 1M
-    selected: DEFAULT_WATCHLIST[0],
+    market: 'US',
+    selected: 'AAPL',
     detailSymbol: null,
-    watchlist: DEFAULT_WATCHLIST.slice(),
+    watchlists: {},                      // marketId -> [symbols]; filled in restore()
     query: '',
     warnedLive: false
   };
+
+  /* state.watchlist is the ACTIVE market's list. Everything downstream reads
+     this one property, so switching markets is a single assignment. */
+  Object.defineProperty(state, 'watchlist', {
+    get: function () {
+      if (!state.watchlists[state.market]) {
+        state.watchlists[state.market] = defaultsFor(state.market);
+      }
+      return state.watchlists[state.market];
+    },
+    set: function (list) { state.watchlists[state.market] = list; }
+  });
 
   var demoCache = {};                    // symbol -> { daily, intraday, meta }
   var metaCache = {};
@@ -164,6 +217,15 @@
   function $(id) { return document.getElementById(id); }
 
   CATALOG.forEach(function (e) { catalogIndex[e.s] = e; });
+
+  // Non-US listings are searchable too — "7203" or "Toyota" both find it
+  Object.keys(MARKET_SYMBOLS).forEach(function (id) {
+    MARKET_SYMBOLS[id].forEach(function (e) {
+      if (catalogIndex[e.s]) return;
+      catalogIndex[e.s] = e;
+      CATALOG.push(e);
+    });
+  });
 
   /* -------------------------------------------------------------- utils -- */
 
@@ -453,6 +515,14 @@
   function quoteFor(symbol, rangeIndex) {
     var s = getSeries(symbol, rangeIndex);
     var last = s.points[s.points.length - 1].c;
+
+    /* The provider's quote wins over the last bar of the series. Before an
+       exchange opens, the newest daily bar is a placeholder carrying the
+       previous close, which would show a stale price for the whole session. */
+    if (s.meta && isFinite(s.meta.regularMarketPrice) && s.meta.regularMarketPrice > 0) {
+      last = s.meta.regularMarketPrice;
+    }
+
     var change = last - s.baseline;
     return {
       series: s,
@@ -573,6 +643,13 @@
              '</div>';
     }).join('');
 
+    var open = openMarkets();
+    var elsewhere = open.filter(function (m) { return m.id !== state.market; });
+    html += '<div class="row row-action focusable" tabindex="0" data-action="market">' +
+              '<span class="action-label">🌐&nbsp; Market · ' + esc(marketById(state.market).label) +
+              (elsewhere.length ? '<em> · ' + esc(elsewhere[0].label) + ' is open</em>' : '') +
+            '</span></div>';
+
     html += '<div class="row row-action focusable" tabindex="0" data-action="edit">' +
             '<span class="action-label">✎&nbsp; Edit List</span></div>';
 
@@ -631,8 +708,12 @@
       if (live.sessionOpen === undefined && state.rangeIndex !== 0) {
         getSeries(state.detailSymbol, 0);
       }
+      /* Yahoo reports 0 — not null — for the day's high, low and volume before
+         an exchange opens. Rendering "High 0.00" beside a price of 12,036 is
+         worse than admitting there is no figure yet. */
       var real = function (value, format) {
-        return (value === null || value === undefined || !isFinite(value)) ? '—' : format(value);
+        return (value === null || value === undefined || !isFinite(value) || value <= 0)
+          ? '—' : format(value);
       };
       cells = [
         ['Open',       real(live.sessionOpen,          fmtPrice)],
@@ -642,7 +723,10 @@
         ['Low',        real(live.regularMarketDayLow,  fmtPrice)],
         ['52W L',      real(live.fiftyTwoWeekLow,      fmtPrice)],
         ['Prev Close', real(live.previousClose,        fmtPrice)],
-        ['Exchange',   live.fullExchangeName || '—']
+        /* Currency matters here: London quotes in GBp (pence), so 11850 is
+           £118.50, not £11,850. Without it the number misleads. */
+        ['Exchange',   (live.fullExchangeName || '—') +
+                       (live.currency ? ' · ' + live.currency : '')]
       ];
     } else {
       cells = [
@@ -691,6 +775,41 @@
 
     el.editList.innerHTML = html;
     el.editCount.textContent = state.watchlist.length;
+  }
+
+  /* ------------------------------------------------------- market render -- */
+
+  function buildMarketList() {
+    el.marketList.innerHTML = MARKETS.map(function (m) {
+      var now = sessionOf(m);
+      var count = (state.watchlists[m.id] || defaultsFor(m.id)).length;
+      return '<div class="edit-row focusable" tabindex="0" data-action="market" data-market="' +
+             m.id + '">' +
+               '<div class="row-id">' +
+                 '<div class="row-symbol' + (m.id === state.market ? ' accent' : '') + '">' +
+                   esc(m.label) + (m.id === state.market ? ' ✓' : '') + '</div>' +
+                 '<div class="row-name">' + count + ' stocks · local ' + now.time + '</div>' +
+               '</div>' +
+               '<span class="pill ' + (now.open ? 'open' : '') + '">' +
+                 (now.open ? '● Open' : 'Closed') + '</span>' +
+             '</div>';
+    }).join('');
+
+    el.marketList.innerHTML += '<div class="edit-row focusable" tabindex="0" data-action="done">' +
+      '<div class="row-id"><div class="row-symbol muted">←&nbsp; Done</div>' +
+      '<div class="row-name">Back to the watchlist</div></div></div>';
+  }
+
+  function setMarket(id) {
+    if (!MARKET_SYMBOLS[id]) return;
+    state.market = id;
+    if (state.watchlist.indexOf(state.selected) === -1) state.selected = state.watchlist[0];
+    persist();
+    buildRows();
+    openWatchlist(state.selected);
+    renderMarketStatus();
+    var now = sessionOf(marketById(id));
+    showToast(marketById(id).label + (now.open ? ' · open ' + now.time : ' · closed ' + now.time));
   }
 
   /* ------------------------------------------------------- search render -- */
@@ -757,22 +876,42 @@
 
   /* ------------------------------------------------------ market status -- */
 
-  function renderMarketStatus() {
-    var parts, map = {}, i;
+  function marketById(id) {
+    for (var i = 0; i < MARKETS.length; i++) if (MARKETS[i].id === id) return MARKETS[i];
+    return MARKETS[0];
+  }
+
+  /* Local wall-clock state of one exchange. Holidays are not modelled. */
+  function sessionOf(market) {
     try {
-      parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York', hour12: false,
+      var map = {};
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: market.tz, hour12: false,
         weekday: 'short', hour: '2-digit', minute: '2-digit'
-      }).formatToParts(new Date());
-      for (i = 0; i < parts.length; i++) map[parts[i].type] = parts[i].value;
-    } catch (e) { return; }
+      }).formatToParts(new Date()).forEach(function (p) { map[p.type] = p.value; });
 
-    var mins = (parseInt(map.hour, 10) % 24) * 60 + parseInt(map.minute, 10);
-    var weekday = map.weekday !== 'Sat' && map.weekday !== 'Sun';
-    var open = weekday && mins >= 9 * 60 + 30 && mins < 16 * 60;
+      var mins = (parseInt(map.hour, 10) % 24) * 60 + parseInt(map.minute, 10);
+      var weekday = map.weekday !== 'Sat' && map.weekday !== 'Sun';
+      return {
+        time: map.hour + ':' + map.minute,
+        open: weekday && mins >= market.open && mins < market.close
+      };
+    } catch (e) {
+      return { time: '--:--', open: false };
+    }
+  }
 
-    el.marketStatus.className = 'market-status' + (open ? ' open' : '');
-    el.marketText.textContent = (open ? 'Open · ' : 'Closed · ') + map.hour + ':' + map.minute;
+  function openMarkets() {
+    return MARKETS.filter(function (m) { return sessionOf(m).open; });
+  }
+
+  /* Top right: which exchange the list belongs to and whether it is trading. */
+  function renderMarketStatus() {
+    var market = marketById(state.market);
+    var now = sessionOf(market);
+    el.marketStatus.className = 'market-status' + (now.open ? ' open' : '');
+    el.marketText.textContent = market.label.toUpperCase() + ' · ' +
+                                (now.open ? now.time : 'CLOSED ' + now.time);
   }
 
   /* --------------------------------------------------------------- toast -- */
@@ -793,7 +932,7 @@
      window switch), which would silently strip the cursor and make Enter a
      no-op. DOM focus is still applied for accessibility, but it is a mirror
      of this state, never the source of truth. */
-  var cursor = { watchlist: 0, edit: 0, results: 0, key: 0, zone: 'rail' };
+  var cursor = { watchlist: 0, edit: 0, market: 0, results: 0, key: 0, zone: 'rail' };
 
   function qsa(root, sel) {
     return Array.prototype.slice.call(root.querySelectorAll(sel));
@@ -803,6 +942,7 @@
     switch (screen) {
       case 'watchlist': return qsa(el.watchlist, '.row');
       case 'edit':      return qsa(el.editList, '.edit-row');
+      case 'market':    return qsa(el.marketList, '.edit-row');
       case 'search':    return cursor.zone === 'rail'
                              ? qsa(el.keyrail, '.key')
                              : qsa(el.results, '.result');
@@ -909,6 +1049,13 @@
     showScreen('edit');
     buildEditList();
     cursor.edit = 0;
+    applyCursor();
+  }
+
+  function openMarketPicker() {
+    showScreen('market');
+    buildMarketList();
+    cursor.market = Math.max(0, MARKETS.map(function (m) { return m.id; }).indexOf(state.market));
     applyCursor();
   }
 
@@ -1111,28 +1258,49 @@
     try {
       localStorage.setItem(CONFIG.storageKey, JSON.stringify({
         rangeIndex: state.rangeIndex,
+        market: state.market,
         selected: state.selected,
-        watchlist: state.watchlist
+        watchlists: state.watchlists
       }));
     } catch (e) { /* storage full or blocked — non-fatal */ }
   }
 
   function restore() {
-    try {
-      var saved = JSON.parse(localStorage.getItem(CONFIG.storageKey) || 'null');
-      if (!saved) return;
-      if (Object.prototype.toString.call(saved.watchlist) === '[object Array]' &&
-          saved.watchlist.length) {
-        state.watchlist = saved.watchlist.filter(function (s) { return typeof s === 'string'; });
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(CONFIG.storageKey) || 'null'); }
+    catch (e) { /* ignore malformed state */ }
+
+    var isArray = function (v) { return Object.prototype.toString.call(v) === '[object Array]'; };
+    var clean = function (list) {
+      return list.filter(function (s) { return typeof s === 'string' && s; });
+    };
+
+    if (saved) {
+      if (saved.watchlists && typeof saved.watchlists === 'object') {
+        Object.keys(MARKET_SYMBOLS).forEach(function (id) {
+          if (isArray(saved.watchlists[id]) && saved.watchlists[id].length) {
+            state.watchlists[id] = clean(saved.watchlists[id]);
+          }
+        });
+      } else if (isArray(saved.watchlist) && saved.watchlist.length) {
+        state.watchlists.US = clean(saved.watchlist);   // pre-markets format
       }
-      if (!state.watchlist.length) state.watchlist = DEFAULT_WATCHLIST.slice();
+      if (MARKET_SYMBOLS[saved.market]) state.market = saved.market;
       if (typeof saved.rangeIndex === 'number' &&
           saved.rangeIndex >= 0 && saved.rangeIndex < RANGES.length) {
         state.rangeIndex = saved.rangeIndex;
       }
-      state.selected = state.watchlist.indexOf(saved.selected) !== -1
-        ? saved.selected : state.watchlist[0];
-    } catch (e) { /* ignore malformed state */ }
+    }
+
+    /* Land on an exchange that is actually trading. Only at startup — never
+       yank the list out from under someone mid-session. */
+    if (!sessionOf(marketById(state.market)).open) {
+      var trading = openMarkets();
+      if (trading.length) state.market = trading[0].id;
+    }
+
+    state.selected = (saved && state.watchlist.indexOf(saved.selected) !== -1)
+      ? saved.selected : state.watchlist[0];
   }
 
   /* --------------------------------------------------------------- input -- */
@@ -1146,8 +1314,18 @@
   function activateWatchlist() {
     var node = currentNode();
     if (!node) return;
-    if (node.getAttribute('data-action') === 'edit') openEdit();
+    var action = node.getAttribute('data-action');
+    if (action === 'edit') openEdit();
+    else if (action === 'market') openMarketPicker();
     else if (node.getAttribute('data-symbol')) openDetail(node.getAttribute('data-symbol'));
+  }
+
+  function activateMarket() {
+    var node = currentNode();
+    if (!node) return;
+    if (node.getAttribute('data-action') === 'done') { openWatchlist(); return; }
+    var id = node.getAttribute('data-market');
+    if (id) setMarket(id);
   }
 
   function activateEdit() {
@@ -1201,6 +1379,15 @@
         }
         return false;
 
+      case 'market':
+        switch (key) {
+          case DPAD.UP:     moveCursor(-1);   return true;
+          case DPAD.DOWN:   moveCursor(1);    return true;
+          case DPAD.SELECT: activateMarket(); return true;
+          case DPAD.BACK:   openWatchlist();  return true;
+        }
+        return false;
+
       case 'search':
         switch (key) {
           case DPAD.LEFT:
@@ -1239,6 +1426,7 @@
     screens.watchlist = $('screen-watchlist');
     screens.detail    = $('screen-detail');
     screens.edit      = $('screen-edit');
+    screens.market    = $('screen-market');
     screens.search    = $('screen-search');
 
     el.rangeBar       = $('range-bar');
@@ -1252,6 +1440,7 @@
     el.stats          = $('stats');
     el.editList       = $('edit-list');
     el.editCount      = $('edit-count');
+    el.marketList     = $('market-list');
     el.keyrail        = $('keyrail');
     el.query          = $('query');
     el.results        = $('results');
@@ -1299,6 +1488,7 @@
       activateWatchlist();
     });
     clickTarget(el.editList, '.edit-row', 'edit', activateEdit);
+    clickTarget(el.marketList, '.edit-row', 'market', activateMarket);
     clickTarget(el.results, '.result', 'search', activateSearch);
     clickTarget(el.keyrail, '.key', 'search', activateSearch);
 

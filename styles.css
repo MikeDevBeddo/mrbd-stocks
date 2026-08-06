@@ -284,6 +284,19 @@ body {
 }
 .action-label { font-size: 17px; font-weight: 600; color: var(--muted); }
 .row-action.cursor .action-label { color: var(--text); }
+.action-label em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--up);
+}
+
+.pill.open {
+  color: var(--up);
+  border-color: rgba(50, 215, 75, 0.5);
+}
+.edit-row.cursor .pill.open {
+  background: var(--up); color: #06210C; border-color: var(--up);
+}
 
 .app-title .back-chevron { font-size: 22px; margin-right: 2px; }
 
