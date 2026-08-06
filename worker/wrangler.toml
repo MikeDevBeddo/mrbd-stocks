@@ -1,0 +1,6 @@
+name = "mrbd-yahoo-proxy"
+main = "yahoo-proxy.js"
+compatibility_date = "2026-01-01"
+
+# Deploy:  wrangler login && wrangler deploy
+# The URL it prints goes into CONFIG.yahooProxy in ../app.js, with '/?url=' appended.

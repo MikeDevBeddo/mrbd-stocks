@@ -200,31 +200,69 @@ Structurally sound — one price across all six ranges, `Low ≤ price ≤ High`
 `52W L ≤ price ≤ 52W H`, no gaps or `NaN` — and factually fiction. That is the demo provider
 working as designed, not a bug.
 
-To switch to live prices, edit `CONFIG` at the top of `app.js`:
+### Turning on real prices
 
-```js
-provider: 'twelvedata',    // was 'demo'
-apiKey: 'YOUR_KEY',        // twelvedata.com free tier
+The obstacle is CORS, not money. A browser may only read a response from a server that opts in
+with an `Access-Control-Allow-Origin` header, and the free keyless quote sources do not send one.
+Measured from the browser, with real CORS rules applied:
+
+| Endpoint | Free | CORS | Usable from the page |
+|---|---|---|---|
+| `twelvedata /stocks` | ✅ no key | ✅ | **yes** — this is the symbol catalogue |
+| `query1/query2.finance.yahoo.com` | ✅ no key | ❌ | only through a proxy |
+| `stooq.com` CSV | ✅ no key | ❌ | no |
+| `twelvedata /time_series` | key | ✅ | with a key |
+| `finnhub /stock/symbol` | key | ✅ | with a key |
+
+Hence the split you can see in the app: NBIS shows the real name *Nebius Group N.V.* from the
+catalogue, but a fabricated price. Two ways to close the gap.
+
+**Option A — Yahoo through your own proxy (no API key).** `worker/yahoo-proxy.js` is a
+Cloudflare Worker that fetches Yahoo and adds the missing header. Free tier, 100k requests/day,
+no card:
+
+```bash
+npm i -g wrangler
+wrangler login
+cd worker && wrangler deploy
 ```
 
-The badge flips to `LIVE`. Demo data still paints the first frame and is replaced in place when
-the request lands; on failure the app stays on demo data and shows a toast. Only the focused
+Then in `app.js`:
+
+```js
+provider:   'yahoo',
+yahooProxy: 'https://mrbd-yahoo-proxy.<subdomain>.workers.dev/?url=',
+```
+
+The worker only forwards to `query1/query2.finance.yahoo.com` — without that allowlist the URL
+would be an open relay anyone could abuse. Note Yahoo's endpoint is undocumented and carries no
+usage guarantee; fine for personal use, not something to build a product on.
+
+**Option B — Twelve Data key.** `provider: 'twelvedata'` plus `apiKey`. Documented and supported,
+800 requests/day free. The adapter is written to the documented `time_series` shape but **has not
+been run against a live key.**
+
+To try a proxy on the glasses, where you cannot edit a file, set it at runtime instead:
+
+```js
+localStorage.setItem('mrbd.yahooProxy', 'https://…workers.dev/?url=')
+```
+
+**Verified end to end** with the Yahoo adapter live — every figure matched a direct
+`curl` to Yahoo exactly:
+
+| | AAPL | MSFT | NVDA | GOOGL | AMZN | TSLA | META | SPY |
+|---|---|---|---|---|---|---|---|---|
+| Price | 312.41 | 499.86 | 218.99 | 357.75 | 272.26 | 319.53 | 589.90 | 768.56 |
+| 1M | +0.56% | +28.55% | +11.20% | −2.53% | +10.68% | −20.69% | −4.17% | +2.79% |
+
+In live mode the detail screen's Open / High / Low / Volume / 52-week range come from the
+provider too, rather than the demo bar. Yahoo's chart endpoint carries no market cap, so that
+cell stays `—` for symbols without a curated anchor.
+
+Whichever provider is on, demo data still paints the first frame and is replaced in place when
+the response lands; on failure the app stays on demo data and shows a toast. Only the focused
 symbol + range is fetched, cached 60 s, which keeps it inside the 10-request budget.
-
-**Verified from the browser** (localhost, so real CORS rules applied):
-
-| Endpoint | Result |
-|---|---|
-| `twelvedata /stocks` | **200, CORS OK, no key** — used for the catalogue |
-| `twelvedata /time_series` | 401 — needs a free key |
-| `finnhub /stock/symbol` | 401 — needs a key |
-| `query1.finance.yahoo.com` | **CORS blocked** — unusable from a browser |
-| `stooq.com` CSV | **CORS blocked** — unusable from a browser |
-
-So: live prices need a free API key, and the two keyless price sources people usually reach for
-cannot be called from a web app at all. The Twelve Data price adapter is written to the
-documented `time_series` shape but **has not been run against a live key** — verify before
-relying on it.
 
 ---
 

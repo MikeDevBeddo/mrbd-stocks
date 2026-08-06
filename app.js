@@ -16,10 +16,16 @@
   /* ------------------------------------------------------------- config -- */
 
   var CONFIG = {
-    // 'demo'       deterministic offline data, works with zero setup
-    // 'twelvedata' live quotes, needs apiKey (twelvedata.com free tier)
+    /* 'demo'       deterministic offline data, works with zero setup
+       'yahoo'      real quotes, NO API key — but Yahoo sends no CORS headers,
+                    so a browser cannot call it directly. Point yahooProxy at
+                    a proxy that adds them (worker/yahoo-proxy.js deploys one
+                    to Cloudflare Workers in ~2 minutes, free, no card).
+       'twelvedata' real quotes via apiKey (twelvedata.com free tier) */
     provider: 'demo',
     apiKey: '',
+    // Base URL that takes a URL-encoded target, e.g. 'https://x.workers.dev/?url='
+    yahooProxy: '',
     liveTtlMs: 60 * 1000,
     storageKey: 'mrbd.stocks.v2',
 
@@ -121,12 +127,12 @@
   var DEFAULT_WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'META', 'SPY'];
 
   var RANGES = [
-    { id: '1D', bars: 0,    live: ['5min',  78]  },   // bars 0 -> intraday
-    { id: '1W', bars: 5,    live: ['30min', 65]  },
-    { id: '1M', bars: 22,   live: ['1day',  22]  },
-    { id: '6M', bars: 126,  live: ['1day',  126] },
-    { id: '1Y', bars: 252,  live: ['1day',  252] },
-    { id: '5Y', bars: 1260, live: ['1week', 260] }
+    { id: '1D', bars: 0,    live: ['5min',  78],  yahoo: ['1d',  '5m']  },  // bars 0 -> intraday
+    { id: '1W', bars: 5,    live: ['30min', 65],  yahoo: ['5d',  '30m'] },
+    { id: '1M', bars: 22,   live: ['1day',  22],  yahoo: ['1mo', '1d']  },
+    { id: '6M', bars: 126,  live: ['1day',  126], yahoo: ['6mo', '1d']  },
+    { id: '1Y', bars: 252,  live: ['1day',  252], yahoo: ['1y',  '1d']  },
+    { id: '5Y', bars: 1260, live: ['1week', 260], yahoo: ['5y',  '1wk'] }
   ];
 
   var DAILY_BARS = 1260;                 // ~5 trading years
@@ -150,6 +156,7 @@
   var demoCache = {};                    // symbol -> { daily, intraday, meta }
   var metaCache = {};
   var liveCache = {};                    // 'SYM:1M' -> { at, data }
+  var liveMeta = {};                     // symbol -> provider meta (real fundamentals)
   var catalogIndex = {};
   var gradSeq = 0;
 
@@ -345,27 +352,78 @@
     });
   }
 
+  /* Yahoo's chart endpoint is keyless and complete — price, previous close,
+     day high/low, 52-week range and volume all arrive in one response — but it
+     sends no CORS headers, so it is only reachable through CONFIG.yahooProxy. */
+  function fetchYahoo(symbol, rangeIndex) {
+    var r = RANGES[rangeIndex];
+    var target = 'https://query1.finance.yahoo.com/v8/finance/chart/' +
+                 encodeURIComponent(symbol) +
+                 '?range=' + r.yahoo[0] + '&interval=' + r.yahoo[1];
+
+    return fetch(CONFIG.yahooProxy + encodeURIComponent(target)).then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }).then(function (json) {
+      var result = json && json.chart && json.chart.result && json.chart.result[0];
+      if (!result) {
+        var err = json && json.chart && json.chart.error;
+        throw new Error(err && err.description ? err.description : 'no data');
+      }
+
+      var stamps = result.timestamp || [];
+      var closes = (result.indicators.quote[0] || {}).close || [];
+      var points = [];
+      for (var i = 0; i < stamps.length; i++) {
+        if (closes[i] === null || closes[i] === undefined) continue;   // market holidays
+        points.push({ t: stamps[i] * 1000, c: closes[i] });
+      }
+      if (points.length < 2) throw new Error('empty series');
+
+      var meta = result.meta || {};
+      // A 1D chart is measured against the previous close, like Apple Stocks
+      var baseline = (r.bars === 0 && isFinite(meta.chartPreviousClose))
+        ? meta.chartPreviousClose : points[0].c;
+
+      return { points: points, baseline: baseline, meta: meta };
+    });
+  }
+
+  /* One request per symbol+range, cached for liveTtlMs, so flicking through
+     ranges cannot stampede the network. Returns demo data until the real
+     response lands — the screen is never blank and never blocks on a fetch. */
+  function cachedLive(symbol, rangeIndex, fetcher) {
+    var key = symbol + ':' + RANGES[rangeIndex].id;
+    var hit = liveCache[key];
+    var fresh = hit && hit.data && Date.now() - hit.at < CONFIG.liveTtlMs;
+
+    if (fresh) return hit.data;
+
+    if (!hit || !hit.pending) {
+      liveCache[key] = { at: Date.now(), data: hit ? hit.data : null, pending: true };
+      fetcher(symbol, rangeIndex).then(function (data) {
+        liveCache[key] = { at: Date.now(), data: data, pending: false };
+        if (data.meta) liveMeta[symbol] = data.meta;
+        render();
+      })['catch'](function (err) {
+        liveCache[key] = { at: Date.now(), data: null, pending: false };
+        if (!state.warnedLive) {
+          state.warnedLive = true;
+          showToast('Live data unavailable (' + err.message + ') — showing demo data', 'error');
+        }
+      });
+    }
+    return (hit && hit.data) ? hit.data : demoSeries(symbol, rangeIndex);
+  }
+
   /* Facade: demo data is returned immediately so nothing ever renders blank;
      live data (when configured) replaces it in place once it lands.         */
   function getSeries(symbol, rangeIndex) {
+    if (CONFIG.provider === 'yahoo' && CONFIG.yahooProxy) {
+      return cachedLive(symbol, rangeIndex, fetchYahoo);
+    }
     if (CONFIG.provider === 'twelvedata' && CONFIG.apiKey) {
-      var key = symbol + ':' + RANGES[rangeIndex].id;
-      var hit = liveCache[key];
-      if (hit && hit.data && Date.now() - hit.at < CONFIG.liveTtlMs) return hit.data;
-      if (!hit || !hit.pending) {
-        liveCache[key] = { at: Date.now(), data: hit ? hit.data : null, pending: true };
-        fetchLive(symbol, rangeIndex).then(function (data) {
-          liveCache[key] = { at: Date.now(), data: data, pending: false };
-          render();
-        })['catch'](function (err) {
-          liveCache[key] = { at: Date.now(), data: null, pending: false };
-          if (!state.warnedLive) {
-            state.warnedLive = true;
-            showToast('Live data unavailable (' + err.message + ') — showing demo data', 'error');
-          }
-        });
-      }
-      if (hit && hit.data) return hit.data;
+      return cachedLive(symbol, rangeIndex, fetchLive);
     }
     return demoSeries(symbol, rangeIndex);
   }
@@ -539,14 +597,22 @@
     var yr = d.daily.slice(-252), hi = -Infinity, lo = Infinity;
     yr.forEach(function (b) { if (b.h > hi) hi = b.h; if (b.l < lo) lo = b.l; });
 
+    /* Prefer the provider's own figures — they are facts. Fall back to the
+       demo bar only for what the provider did not send. */
+    var live = liveMeta[state.detailSymbol] || {};
+    function pick(realValue, demoValue, format) {
+      if (isFinite(realValue) && realValue !== null) return format(realValue);
+      return demoValue === null ? '—' : format(demoValue);
+    }
+
     var cells = [
-      ['Open',    fmtPrice(bar.o)],
-      ['Volume',  fmtCompact(bar.v)],
-      ['High',    fmtPrice(bar.h)],
-      ['52W H',   fmtPrice(hi)],
-      ['Low',     fmtPrice(bar.l)],
-      ['52W L',   fmtPrice(lo)],
-      ['Mkt Cap', (!m.derived && m.shares) ? fmtCompact(m.shares * q.price) : '—'],
+      ['Open',    pick(live.regularMarketOpen,    bar.o, fmtPrice)],
+      ['Volume',  pick(live.regularMarketVolume,  bar.v, fmtCompact)],
+      ['High',    pick(live.regularMarketDayHigh, bar.h, fmtPrice)],
+      ['52W H',   pick(live.fiftyTwoWeekHigh,     hi,    fmtPrice)],
+      ['Low',     pick(live.regularMarketDayLow,  bar.l, fmtPrice)],
+      ['52W L',   pick(live.fiftyTwoWeekLow,      lo,    fmtPrice)],
+      ['Mkt Cap', pick(live.marketCap, (!m.derived && m.shares) ? m.shares * q.price : null, fmtCompact)],
       ['P/E',     (!m.derived && m.pe) ? m.pe.toFixed(1) : '—']
     ];
 
@@ -1154,7 +1220,17 @@
     el.dataBadge      = $('data-badge');
     el.toast          = $('toast');
 
-    var live = CONFIG.provider === 'twelvedata' && !!CONFIG.apiKey;
+    /* Escape hatch: set the proxy from the device without redeploying —
+         localStorage.setItem('mrbd.yahooProxy', 'https://…workers.dev/?url=')
+       Editing CONFIG above is the permanent way; this is for trying a proxy
+       on the glasses, where there is no way to edit a file. */
+    try {
+      var saved = localStorage.getItem('mrbd.yahooProxy');
+      if (saved) { CONFIG.yahooProxy = saved; CONFIG.provider = 'yahoo'; }
+    } catch (e) { /* storage blocked — keep the compiled-in config */ }
+
+    var live = (CONFIG.provider === 'twelvedata' && !!CONFIG.apiKey) ||
+               (CONFIG.provider === 'yahoo' && !!CONFIG.yahooProxy);
     el.dataBadge.textContent = live ? 'LIVE' : 'DEMO';
     el.dataBadge.className = 'data-badge' + (live ? ' live' : '');
 
