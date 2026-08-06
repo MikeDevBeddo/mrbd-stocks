@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stocks — Ray-Ban Display simulator</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center; gap: 48px;
+    background: #0B0C0E;
+    color: #E4E6EB;
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 32px;
+  }
+
+  /* The "world" behind the additive waveguide */
+  .stage {
+    position: relative;
+    width: 600px; height: 600px;
+    border-radius: 8px;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 90% at 20% 10%, #4a5a6b 0%, #2a3340 45%, #141a21 100%),
+      linear-gradient(160deg, #38424f, #10151b);
+    box-shadow: 0 0 0 1px #2A2F36, 0 24px 60px rgba(0,0,0,.6);
+  }
+  .stage::after {
+    content: "";
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(112deg, rgba(255,255,255,.05) 0 3px, transparent 3px 26px),
+      repeating-linear-gradient(20deg, rgba(0,0,0,.14) 0 8px, transparent 8px 40px);
+    pointer-events: none;
+  }
+  .stage.plain { background: #000; }
+  .stage.plain::after { display: none; }
+
+  iframe {
+    position: absolute; inset: 0;
+    width: 600px; height: 600px;
+    border: 0;
+    z-index: 2;
+  }
+  .stage.additive iframe { mix-blend-mode: screen; }
+
+  .panel { width: 300px; display: flex; flex-direction: column; gap: 20px; }
+  h1 { font-size: 20px; font-weight: 700; color: #fff; }
+  h1 small { display: block; font-size: 12px; font-weight: 400; color: #8A9099; margin-top: 4px; }
+
+  .dpad { display: grid; grid-template-columns: repeat(3, 64px); gap: 8px; justify-content: start; }
+  .dpad button, .row-btn button {
+    height: 56px; border: 1px solid #2E343C; background: #191D22; color: #E4E6EB;
+    border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .dpad button:hover, .row-btn button:hover { background: #232830; border-color: #00D4FF; }
+  .dpad button:active { transform: translateY(1px); }
+  .dpad .spacer { visibility: hidden; }
+  .row-btn { display: flex; gap: 8px; }
+  .row-btn button { flex: 1; }
+
+  .opts { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #B0B3B8; }
+  label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+  .note {
+    font-size: 12px; color: #8A9099; line-height: 1.6;
+    border-left: 2px solid #2E343C; padding-left: 10px;
+  }
+  kbd {
+    background: #232830; border: 1px solid #343B44; border-radius: 4px;
+    padding: 1px 5px; font-size: 11px; font-family: inherit;
+  }
+</style>
+</head>
+<body>
+
+<div class="stage additive" id="stage">
+  <iframe id="app" src="index.html" title="Stocks web app"></iframe>
+</div>
+
+<div class="panel">
+  <h1>Ray-Ban Display simulator
+    <small>600 × 600 · additive waveguide · D-pad only</small>
+  </h1>
+
+  <div class="dpad">
+    <span class="spacer"></span>
+    <button data-key="ArrowUp">▲</button>
+    <span class="spacer"></span>
+    <button data-key="ArrowLeft">◀</button>
+    <button data-key="Enter">⏎</button>
+    <button data-key="ArrowRight">▶</button>
+    <span class="spacer"></span>
+    <button data-key="ArrowDown">▼</button>
+    <span class="spacer"></span>
+  </div>
+
+  <div class="row-btn">
+    <button data-key="Escape">⎋ Back</button>
+    <button id="reload">↻ Reload</button>
+  </div>
+
+  <div class="opts">
+    <label><input type="checkbox" id="opt-additive" checked> Additive blend (black = transparent)</label>
+    <label><input type="checkbox" id="opt-world" checked> Show world behind the lens</label>
+  </div>
+
+  <p class="note">
+    Your real <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd><kbd>Enter</kbd><kbd>Esc</kbd>
+    keys are forwarded into the app — the same events the Neural Band produces on device.
+    <br><br>
+    Toggle the world off to check contrast the way the design guide measures it.
+  </p>
+</div>
+
+<script>
+  var frame  = document.getElementById('app');
+  var stage  = document.getElementById('stage');
+
+  function send(key) {
+    var doc = frame.contentDocument;
+    if (!doc) return;
+    doc.dispatchEvent(new KeyboardEvent('keydown', { key: key, bubbles: true, cancelable: true }));
+  }
+
+  document.querySelectorAll('[data-key]').forEach(function (btn) {
+    btn.addEventListener('click', function () { send(btn.getAttribute('data-key')); });
+  });
+
+  document.getElementById('reload').addEventListener('click', function () {
+    frame.contentWindow.location.reload();
+  });
+
+  // Forward host keystrokes (only fires when the parent page has focus —
+  // when the iframe itself is focused the app receives them directly).
+  document.addEventListener('keydown', function (e) {
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Escape'].indexOf(e.key) === -1) return;
+    e.preventDefault();
+    send(e.key);
+  });
+
+  document.getElementById('opt-additive').addEventListener('change', function (e) {
+    stage.classList.toggle('additive', e.target.checked);
+  });
+  document.getElementById('opt-world').addEventListener('change', function (e) {
+    stage.classList.toggle('plain', !e.target.checked);
+  });
+</script>
+</body>
+</html>

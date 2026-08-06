@@ -1,0 +1,13 @@
+{
+  "name": "mrbd-stocks",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stocks watchlist web app for Meta Ray-Ban Display glasses",
+  "scripts": {
+    "start": "node server.js",
+    "icon": "node scripts/make-icon.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+<meta name="description" content="Stocks watchlist with selectable charts for Meta Ray-Ban Display">
+<meta name="mrbd-web-app-capable" content="yes">
+<meta name="theme-color" content="#1C1E21">
+<link rel="icon" type="image/png" sizes="64x64" href="icon.png">
+<link rel="stylesheet" href="styles.css">
+<title>Stocks</title>
+</head>
+<body>
+
+<!-- ============ WATCHLIST (main screen) ============ -->
+<section class="screen" id="screen-watchlist">
+
+  <header class="app-header">
+    <h1 class="app-title">Stocks</h1>
+    <div class="header-right">
+      <span class="market-status" id="market-status">
+        <i class="dot"></i><span id="market-text">Closed</span>
+      </span>
+      <span class="data-badge" id="data-badge">DEMO</span>
+    </div>
+  </header>
+
+  <!-- Range applies to every sparkline in the list -->
+  <div class="range-bar" id="range-bar"></div>
+
+  <p class="hint">
+    <b>▲▼</b> stock &nbsp;·&nbsp; <b>◀▶</b> range &nbsp;·&nbsp; <b>⏎</b> details
+  </p>
+
+  <div class="list" id="watchlist"></div>
+</section>
+
+<!-- ============ DETAIL ============ -->
+<section class="screen hidden" id="screen-detail">
+
+  <header class="app-header detail-header">
+    <div class="detail-id">
+      <span class="back-chevron">←</span>
+      <div>
+        <div class="detail-symbol" id="detail-symbol">AAPL</div>
+        <div class="detail-name" id="detail-name">Apple Inc.</div>
+      </div>
+    </div>
+    <div class="detail-quote">
+      <div class="detail-price" id="detail-price">—</div>
+      <div class="detail-change" id="detail-change">—</div>
+    </div>
+  </header>
+
+  <div class="detail-chart" id="detail-chart"></div>
+  <div class="range-bar" id="range-bar-detail"></div>
+
+  <div class="stats" id="stats"></div>
+
+  <p class="hint">
+    <b>▲▼</b> stock &nbsp;·&nbsp; <b>◀▶</b> range &nbsp;·&nbsp; <b>⏎</b> back to list
+  </p>
+</section>
+
+<!-- ============ EDIT WATCHLIST ============ -->
+<section class="screen hidden" id="screen-edit">
+
+  <header class="app-header">
+    <h1 class="app-title"><span class="back-chevron">←</span> Edit List</h1>
+    <span class="data-badge" id="edit-count">8</span>
+  </header>
+
+  <p class="hint">
+    <b>▲▼</b> select &nbsp;·&nbsp; <b>⏎</b> activate
+  </p>
+
+  <div class="list" id="edit-list"></div>
+</section>
+
+<!-- ============ ADD STOCK (D-pad search) ============ -->
+<section class="screen hidden" id="screen-search">
+
+  <header class="app-header">
+    <h1 class="app-title"><span class="back-chevron">←</span> Add Stock</h1>
+    <span class="query" id="query"><i>type a prefix</i></span>
+  </header>
+
+  <div class="keyrail" id="keyrail"></div>
+
+  <p class="hint" id="search-hint">
+    <b>◀▶</b> letter &nbsp;·&nbsp; <b>⏎</b> type &nbsp;·&nbsp; <b>▼</b> results &nbsp;·&nbsp; <b>⎋</b> back
+  </p>
+
+  <div class="list" id="results"></div>
+</section>
+
+<div class="toast hidden" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
