@@ -371,8 +371,9 @@
         throw new Error(err && err.description ? err.description : 'no data');
       }
 
+      var quote = result.indicators.quote[0] || {};
       var stamps = result.timestamp || [];
-      var closes = (result.indicators.quote[0] || {}).close || [];
+      var closes = quote.close || [];
       var points = [];
       for (var i = 0; i < stamps.length; i++) {
         if (closes[i] === null || closes[i] === undefined) continue;   // market holidays
@@ -381,6 +382,16 @@
       if (points.length < 2) throw new Error('empty series');
 
       var meta = result.meta || {};
+
+      /* Yahoo omits regularMarketOpen. The first bar of the INTRADAY series is
+         the real session open; the first bar of any other range is the open of
+         some day weeks ago, so only take it from 1D. */
+      if (r.bars === 0) {
+        var opens = quote.open || [];
+        for (var j = 0; j < opens.length; j++) {
+          if (opens[j] !== null && opens[j] !== undefined) { meta.sessionOpen = opens[j]; break; }
+        }
+      }
       // A 1D chart is measured against the previous close, like Apple Stocks
       var baseline = (r.bars === 0 && isFinite(meta.chartPreviousClose))
         ? meta.chartPreviousClose : points[0].c;
@@ -403,7 +414,13 @@
       liveCache[key] = { at: Date.now(), data: hit ? hit.data : null, pending: true };
       fetcher(symbol, rangeIndex).then(function (data) {
         liveCache[key] = { at: Date.now(), data: data, pending: false };
-        if (data.meta) liveMeta[symbol] = data.meta;
+        // Merge, never replace: sessionOpen only ever arrives with the 1D fetch
+        if (data.meta) {
+          var into = liveMeta[symbol] || (liveMeta[symbol] = {});
+          for (var k in data.meta) {
+            if (data.meta[k] !== null && data.meta[k] !== undefined) into[k] = data.meta[k];
+          }
+        }
         render();
       })['catch'](function (err) {
         liveCache[key] = { at: Date.now(), data: null, pending: false };
@@ -426,6 +443,11 @@
       return cachedLive(symbol, rangeIndex, fetchLive);
     }
     return demoSeries(symbol, rangeIndex);
+  }
+
+  function liveActive() {
+    return (CONFIG.provider === 'yahoo' && !!CONFIG.yahooProxy) ||
+           (CONFIG.provider === 'twelvedata' && !!CONFIG.apiKey);
   }
 
   function quoteFor(symbol, rangeIndex) {
@@ -597,24 +619,43 @@
     var yr = d.daily.slice(-252), hi = -Infinity, lo = Infinity;
     yr.forEach(function (b) { if (b.h > hi) hi = b.h; if (b.l < lo) lo = b.l; });
 
-    /* Prefer the provider's own figures — they are facts. Fall back to the
-       demo bar only for what the provider did not send. */
-    var live = liveMeta[state.detailSymbol] || {};
-    function pick(realValue, demoValue, format) {
-      if (isFinite(realValue) && realValue !== null) return format(realValue);
-      return demoValue === null ? '—' : format(demoValue);
+    /* Never mix sources in one table. Under a live provider every cell comes
+       from that provider or reads '—'; falling back to the demo bar once put a
+       synthetic open of 124.01 next to a real day range of 217.27-223.63. */
+    var cells;
+    if (liveActive()) {
+      var live = liveMeta[state.detailSymbol] || {};
+      /* The session open only rides along with the intraday response, so pull
+         1D in the background when the user opened the detail on another range.
+         getSeries caches it and re-renders when it lands. */
+      if (live.sessionOpen === undefined && state.rangeIndex !== 0) {
+        getSeries(state.detailSymbol, 0);
+      }
+      var real = function (value, format) {
+        return (value === null || value === undefined || !isFinite(value)) ? '—' : format(value);
+      };
+      cells = [
+        ['Open',       real(live.sessionOpen,          fmtPrice)],
+        ['Volume',     real(live.regularMarketVolume,  fmtCompact)],
+        ['High',       real(live.regularMarketDayHigh, fmtPrice)],
+        ['52W H',      real(live.fiftyTwoWeekHigh,     fmtPrice)],
+        ['Low',        real(live.regularMarketDayLow,  fmtPrice)],
+        ['52W L',      real(live.fiftyTwoWeekLow,      fmtPrice)],
+        ['Prev Close', real(live.previousClose,        fmtPrice)],
+        ['Exchange',   live.fullExchangeName || '—']
+      ];
+    } else {
+      cells = [
+        ['Open',    fmtPrice(bar.o)],
+        ['Volume',  fmtCompact(bar.v)],
+        ['High',    fmtPrice(bar.h)],
+        ['52W H',   fmtPrice(hi)],
+        ['Low',     fmtPrice(bar.l)],
+        ['52W L',   fmtPrice(lo)],
+        ['Mkt Cap', (!m.derived && m.shares) ? fmtCompact(m.shares * q.price) : '—'],
+        ['P/E',     (!m.derived && m.pe) ? m.pe.toFixed(1) : '—']
+      ];
     }
-
-    var cells = [
-      ['Open',    pick(live.regularMarketOpen,    bar.o, fmtPrice)],
-      ['Volume',  pick(live.regularMarketVolume,  bar.v, fmtCompact)],
-      ['High',    pick(live.regularMarketDayHigh, bar.h, fmtPrice)],
-      ['52W H',   pick(live.fiftyTwoWeekHigh,     hi,    fmtPrice)],
-      ['Low',     pick(live.regularMarketDayLow,  bar.l, fmtPrice)],
-      ['52W L',   pick(live.fiftyTwoWeekLow,      lo,    fmtPrice)],
-      ['Mkt Cap', pick(live.marketCap, (!m.derived && m.shares) ? m.shares * q.price : null, fmtCompact)],
-      ['P/E',     (!m.derived && m.pe) ? m.pe.toFixed(1) : '—']
-    ];
 
     el.stats.innerHTML = cells.map(function (c) {
       return '<div class="stat"><span class="stat-label">' + c[0] +
@@ -1229,10 +1270,9 @@
       if (saved) { CONFIG.yahooProxy = saved; CONFIG.provider = 'yahoo'; }
     } catch (e) { /* storage blocked — keep the compiled-in config */ }
 
-    var live = (CONFIG.provider === 'twelvedata' && !!CONFIG.apiKey) ||
-               (CONFIG.provider === 'yahoo' && !!CONFIG.yahooProxy);
-    el.dataBadge.textContent = live ? 'LIVE' : 'DEMO';
-    el.dataBadge.className = 'data-badge' + (live ? ' live' : '');
+    var isLive = liveActive();
+    el.dataBadge.textContent = isLive ? 'LIVE' : 'DEMO';
+    el.dataBadge.className = 'data-badge' + (isLive ? ' live' : '');
 
     restore();
     hydrateCatalogFromCache();
