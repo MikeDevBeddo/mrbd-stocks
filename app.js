@@ -22,10 +22,10 @@
                     a proxy that adds them (worker/yahoo-proxy.js deploys one
                     to Cloudflare Workers in ~2 minutes, free, no card).
        'twelvedata' real quotes via apiKey (twelvedata.com free tier) */
-    provider: 'demo',
+    provider: 'yahoo',
     apiKey: '',
-    // Base URL that takes a URL-encoded target, e.g. 'https://x.workers.dev/?url='
-    yahooProxy: '',
+    // Base URL that takes a URL-encoded target — deployed from worker/
+    yahooProxy: 'https://mrbd-yahoo-proxy.stocks-meta.workers.dev/?url=',
     liveTtlMs: 60 * 1000,
     storageKey: 'mrbd.stocks.v2',
 
