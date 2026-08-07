@@ -293,6 +293,25 @@ To try a proxy on the glasses, where you cannot edit a file, set it at runtime i
 localStorage.setItem('mrbd.yahooProxy', 'https://…workers.dev/?url=')
 ```
 
+**Verified per market.** Switching between all five exchanges and comparing each against a direct
+`curl`, every settled price and percentage matched:
+
+| | US | London | Hong Kong | Tokyo | Sydney |
+|---|---|---|---|---|---|
+| | AAPL 312.41 | AZN.L 11,850.00 | 0700.HK 479.20 | 7203.T 2,983.50 | BHP.AX 62.82 |
+| | +0.56% | −15.96% | +6.02% | +1.27% | +6.71% |
+
+**Verified per range.** NBIS across all six spans, app against ground truth fetched at the same
+moment — identical to the last decimal:
+
+| | 1D | 1W | 1M | 6M | 1Y | 5Y |
+|---|---|---|---|---|---|---|
+| Change | −13.29% | −0.09% | −2.72% | +104.44% | +190.74% | +870.26% |
+
+(Comparing a `1mo` window against a `curl` made minutes later can differ by a fraction of a
+percent: Yahoo's range is relative to request time, so the first bar drops out as the boundary
+rolls. It is not drift in the app — fetch both at the same moment and they agree.)
+
 **Verified end to end** with the Yahoo adapter live — every figure matched a direct
 `curl` to Yahoo exactly:
 
@@ -305,9 +324,15 @@ In live mode the detail screen's Open / High / Low / Volume / 52-week range come
 provider too, rather than the demo bar. Yahoo's chart endpoint carries no market cap, so that
 cell stays `—` for symbols without a curated anchor.
 
-Whichever provider is on, demo data still paints the first frame and is replaced in place when
-the response lands; on failure the app stays on demo data and shows a toast. Only the focused
-symbol + range is fetched, cached 60 s, which keeps it inside the 10-request budget.
+Under a live provider, a quote that has not arrived yet renders as `—` and `···`, **never as
+demo numbers**. Substituting the synthetic series while a request was in flight put fabricated
+figures under a `LIVE` badge for a second or two — switching to London briefly showed AZN.L at
+69.73 instead of 11,850. On outright failure the app falls back to demo data and says so in a
+toast.
+
+Quotes are cached 60 s per symbol + range, and a visible watchlist or detail screen re-polls on
+the same cadence **while its exchange is trading** — without that the screen only refetched when
+the wearer pressed something, so prices sat frozen during an active session.
 
 ---
 

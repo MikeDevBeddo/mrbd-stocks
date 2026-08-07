@@ -223,6 +223,13 @@ body {
 }
 .badge.up   { background: var(--up);   color: #06210C; }
 .badge.down { background: var(--down); color: #2A0705; }
+/* Waiting on the provider — never a number, so nothing can be misread */
+.badge.pending {
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--muted);
+  letter-spacing: 2px;
+}
 
 /* ---------------------------------------------------------------- detail -- */
 

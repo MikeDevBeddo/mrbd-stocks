@@ -24,6 +24,8 @@
        'twelvedata' real quotes via apiKey (twelvedata.com free tier) */
     provider: 'yahoo',
     apiKey: '',
+    // How often a visible, trading market is re-polled
+    refreshMs: 60 * 1000,
     // Base URL that takes a URL-encoded target — deployed from worker/
     yahooProxy: 'https://mrbd-yahoo-proxy.stocks-meta.workers.dev/?url=',
     liveTtlMs: 60 * 1000,
@@ -481,7 +483,9 @@
     if (fresh) return hit.data;
 
     if (!hit || !hit.pending) {
-      liveCache[key] = { at: Date.now(), data: hit ? hit.data : null, pending: true };
+      /* Keep the original timestamp. Stamping "now" onto a request that has
+         only just started would mark the OLD data fresh for another full TTL. */
+      liveCache[key] = { at: hit ? hit.at : 0, data: hit ? hit.data : null, pending: true };
       fetcher(symbol, rangeIndex).then(function (data) {
         liveCache[key] = { at: Date.now(), data: data, pending: false };
         // Merge, never replace: sessionOpen only ever arrives with the 1D fetch
@@ -511,7 +515,11 @@
         }
       });
     }
-    return (hit && hit.data) ? hit.data : demoSeries(symbol, rangeIndex);
+    /* Deliberately NOT demo data. Falling back to the synthetic series here
+       painted fabricated numbers under a LIVE badge for the second or two a
+       request takes — switching to London briefly showed AZN.L at 69.73
+       instead of 11,850. null means "no figure yet" and the UI shows dashes. */
+    return (hit && hit.data) ? hit.data : null;
   }
 
   /* Facade: demo data is returned immediately so nothing ever renders blank;
@@ -533,6 +541,8 @@
 
   function quoteFor(symbol, rangeIndex) {
     var s = getSeries(symbol, rangeIndex);
+    if (!s) return { pending: true };
+
     var last = s.points[s.points.length - 1].c;
 
     /* The provider's quote wins over the last bar of the series. Before an
@@ -678,14 +688,23 @@
   function renderRows() {
     state.watchlist.forEach(function (symbol) {
       var q = quoteFor(symbol, state.rangeIndex);
-      var sel = '[data-spark="' + symbol + '"]';
-      var spark = el.watchlist.querySelector(sel);
+      var spark = el.watchlist.querySelector('[data-spark="' + symbol + '"]');
       if (!spark) return;
+      var price = el.watchlist.querySelector('[data-price="' + symbol + '"]');
+      var badge = el.watchlist.querySelector('[data-badge="' + symbol + '"]');
+
+      if (q.pending) {                      // request in flight — show nothing rather than fiction
+        spark.innerHTML = '';
+        price.textContent = '—';
+        badge.textContent = '···';
+        badge.className = 'badge pending';
+        return;
+      }
+
       spark.innerHTML = chartSvg(92, 40, downsample(q.series.points, 40), q.series.baseline, {
         color: colorFor(q.up), strokeWidth: 2, padY: 5, baseline: false
       });
-      el.watchlist.querySelector('[data-price="' + symbol + '"]').textContent = fmtPrice(q.price);
-      var badge = el.watchlist.querySelector('[data-badge="' + symbol + '"]');
+      price.textContent = fmtPrice(q.price);
       badge.textContent = fmtSigned(q.pct) + '%';
       badge.className = 'badge ' + (q.up ? 'up' : 'down');
     });
@@ -696,11 +715,25 @@
   function renderDetail() {
     var m = metaFor(state.detailSymbol);
     var q = quoteFor(state.detailSymbol, state.rangeIndex);
-    var d = buildDemo(state.detailSymbol);
-    var bar = d.daily[d.daily.length - 1];
 
     el.detailSymbol.textContent = m.symbol;
     el.detailName.textContent = m.name;
+
+    if (q.pending) {
+      el.detailPrice.textContent = '—';
+      el.detailChange.textContent = 'Loading ' + RANGES[state.rangeIndex].id + '…';
+      el.detailChange.className = 'detail-change';
+      el.detailChart.innerHTML = '';
+      el.stats.innerHTML = ['Open', 'Volume', 'High', '52W H', 'Low', '52W L', 'Prev Close', 'Exchange']
+        .map(function (label) {
+          return '<div class="stat"><span class="stat-label">' + label +
+                 '</span><span class="stat-value">—</span></div>';
+        }).join('');
+      return;
+    }
+
+    var d = buildDemo(state.detailSymbol);
+    var bar = d.daily[d.daily.length - 1];
     el.detailPrice.textContent = fmtPrice(q.price);
     el.detailChange.textContent = fmtSigned(q.change) + '  ' + fmtSigned(q.pct) + '%  ' +
                                   RANGES[state.rangeIndex].id;
@@ -1574,6 +1607,18 @@
     render();
     renderMarketStatus();
     setInterval(renderMarketStatus, 30000);
+
+    /* Without this the screen only ever refetches when the wearer presses
+       something: prices sit frozen at whatever was fetched on the last render,
+       which is wrong for a market that is actively trading. Re-render on a
+       timer and cachedLive re-pulls anything past its TTL. Skipped while the
+       exchange is shut, and while a screen with no quotes on it is showing. */
+    setInterval(function () {
+      if (!liveActive()) return;
+      if (state.screen !== 'watchlist' && state.screen !== 'detail') return;
+      if (!sessionOf(marketById(state.market)).open) return;
+      render();
+    }, CONFIG.refreshMs);
 
     pointCursorAt(state.selected);
     applyCursor();
