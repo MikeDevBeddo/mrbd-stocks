@@ -97,15 +97,16 @@ screen therefore has an exit that is a cursor target reachable with arrows and `
 
 ### Markets
 
-Four exchanges, each with its own watchlist, all served by the same Yahoo adapter through the
-ticker suffix (`.L`, `.HK`, `.T`):
+Five exchanges, each with its own watchlist, all served by the same Yahoo adapter through the
+ticker suffix (`.L`, `.HK`, `.T`, `.AX`):
 
-| | Session (local) | Zone |
+| | Fallback schedule (local) | Zone |
 |---|---|---|
 | US | 09:30 – 16:00 | America/New_York |
 | London | 08:00 – 16:30 | Europe/London |
-| Hong Kong | 09:30 – 16:00 | Asia/Hong_Kong |
+| Hong Kong | 09:30 – 16:10 | Asia/Hong_Kong |
 | Tokyo | 09:00 – 15:30 | Asia/Tokyo |
+| Sydney | 10:00 – 16:00 | Australia/Sydney |
 
 The header's top right names the active exchange and its local clock, green while it is trading.
 The **Market** row at the foot of the watchlist opens the picker, which shows every exchange's
@@ -115,8 +116,26 @@ At startup, if the remembered exchange is shut and another is open, the app swit
 one — only then, never mid-session, so a list is not yanked out from under you. Adding or
 removing a stock affects the active market's list alone.
 
-**Holidays are not modelled** — an exchange closed for a public holiday still reads as open.
-Tokyo's lunch break (11:30–12:30) is also ignored.
+### Why there is no holiday calendar
+
+Because the exchange ships one. Yahoo returns `meta.currentTradingPeriod.regular` — the actual
+open and close instants of the current session — with every quote, and the app uses it in
+preference to the table above.
+
+That is worth more than any calendar this project could bundle. It is right about public
+holidays (on a closed day the reported window is simply a different date, so the session never
+reads as open), about half-day early closes, about daylight saving, and about details a
+hand-written schedule gets wrong. Two it caught immediately: **Hong Kong closes at 16:10** and
+**Sydney at 16:12**, not on the hour — both carry a closing auction. A shipped calendar would
+also have started rotting the day it was written.
+
+The fixed schedule above survives only as the fallback for the first paint, before any quote has
+landed, and for demo mode. The header says which is in force implicitly: once live, a closed
+market shows when it next opens — `LONDON · CLOSED · OPENS 08:00` — a time that comes from the
+exchange, not from arithmetic.
+
+Tokyo's lunch break (11:30–12:30) is not reflected: Yahoo reports one continuous session, so the
+app does too.
 
 London quotes in **GBp — pence**, so `11,850.00` is £118.50. The detail screen's Exchange cell
 shows the currency for exactly this reason.

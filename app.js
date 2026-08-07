@@ -131,8 +131,9 @@
   var MARKETS = [
     { id: 'US',  label: 'US',        tz: 'America/New_York', open: 9 * 60 + 30, close: 16 * 60 },
     { id: 'LSE', label: 'London',    tz: 'Europe/London',    open: 8 * 60,      close: 16 * 60 + 30 },
-    { id: 'HKG', label: 'Hong Kong', tz: 'Asia/Hong_Kong',   open: 9 * 60 + 30, close: 16 * 60 },
-    { id: 'TYO', label: 'Tokyo',     tz: 'Asia/Tokyo',       open: 9 * 60,      close: 15 * 60 + 30 }
+    { id: 'HKG', label: 'Hong Kong', tz: 'Asia/Hong_Kong',   open: 9 * 60 + 30, close: 16 * 60 + 10 },
+    { id: 'TYO', label: 'Tokyo',     tz: 'Asia/Tokyo',       open: 9 * 60,      close: 15 * 60 + 30 },
+    { id: 'ASX', label: 'Sydney',    tz: 'Australia/Sydney', open: 10 * 60,     close: 16 * 60 }
   ];
 
   var MARKET_SYMBOLS = {
@@ -159,6 +160,12 @@
       { s: '9984.T', n: 'SoftBank Group Corp.' }, { s: '8306.T', n: 'Mitsubishi UFJ Financial' },
       { s: '6861.T', n: 'Keyence Corp.' },        { s: '9432.T', n: 'Nippon Telegraph & Telephone' },
       { s: '7974.T', n: 'Nintendo Co., Ltd.' },   { s: '6501.T', n: 'Hitachi, Ltd.' }
+    ],
+    ASX: [
+      { s: 'BHP.AX', n: 'BHP Group Limited' },    { s: 'CBA.AX', n: 'Commonwealth Bank of Australia' },
+      { s: 'CSL.AX', n: 'CSL Limited' },          { s: 'NAB.AX', n: 'National Australia Bank' },
+      { s: 'WBC.AX', n: 'Westpac Banking Corp.' }, { s: 'ANZ.AX', n: 'ANZ Group Holdings' },
+      { s: 'WES.AX', n: 'Wesfarmers Limited' },   { s: 'MQG.AX', n: 'Macquarie Group Limited' }
     ]
   };
 
@@ -210,6 +217,7 @@
   var metaCache = {};
   var liveCache = {};                    // 'SYM:1M' -> { at, data }
   var liveMeta = {};                     // symbol -> provider meta (real fundamentals)
+  var marketSessions = {};               // marketId -> { start, end } epoch seconds
   var catalogIndex = {};
   var gradSeq = 0;
 
@@ -481,6 +489,17 @@
           var into = liveMeta[symbol] || (liveMeta[symbol] = {});
           for (var k in data.meta) {
             if (data.meta[k] !== null && data.meta[k] !== undefined) into[k] = data.meta[k];
+          }
+          /* The exchange's own session window — worth more than any calendar
+             we could ship, so it overrides the fixed schedule once it lands. */
+          var period = data.meta.currentTradingPeriod && data.meta.currentTradingPeriod.regular;
+          if (period && period.start && period.end) {
+            marketSessions[marketOfSymbol(symbol)] = { start: period.start, end: period.end };
+            renderMarketStatus();
+            if (state.screen === 'market') {
+              buildMarketList();
+              applyCursor();
+            }
           }
         }
         render();
@@ -788,7 +807,8 @@
                '<div class="row-id">' +
                  '<div class="row-symbol' + (m.id === state.market ? ' accent' : '') + '">' +
                    esc(m.label) + (m.id === state.market ? ' ✓' : '') + '</div>' +
-                 '<div class="row-name">' + count + ' stocks · local ' + now.time + '</div>' +
+                 '<div class="row-name">' + count + ' stocks · local ' + now.time +
+                   (now.nextOpen ? ' · opens ' + esc(now.nextOpen) : '') + '</div>' +
                '</div>' +
                '<span class="pill ' + (now.open ? 'open' : '') + '">' +
                  (now.open ? '● Open' : 'Closed') + '</span>' +
@@ -881,24 +901,69 @@
     return MARKETS[0];
   }
 
-  /* Local wall-clock state of one exchange. Holidays are not modelled. */
+  function marketOfSymbol(symbol) {
+    if (/\.L$/.test(symbol))  return 'LSE';
+    if (/\.HK$/.test(symbol)) return 'HKG';
+    if (/\.T$/.test(symbol))  return 'TYO';
+    if (/\.AX$/.test(symbol)) return 'ASX';
+    return 'US';
+  }
+
+  function fmtInTz(ms, tz, opts) {
+    var base = { timeZone: tz, hour12: false };
+    for (var k in opts) base[k] = opts[k];
+    return new Intl.DateTimeFormat('en-US', base).format(new Date(ms));
+  }
+
+  /* Session state of one exchange.
+
+     Yahoo reports the exchange's ACTUAL trading window in
+     meta.currentTradingPeriod, so that is used whenever it has arrived. It is
+     authoritative in a way a hand-written calendar can never be: it already
+     accounts for public holidays (the reported window is simply a different
+     day), half-day early closes, daylight saving, and quirks like Hong Kong
+     closing at 16:10 rather than 16:00 for the closing auction.
+
+     The fixed schedule below is only the fallback for the first paint, before
+     any quote has landed, and for demo mode. */
   function sessionOf(market) {
+    var clock;
     try {
       var map = {};
       new Intl.DateTimeFormat('en-US', {
         timeZone: market.tz, hour12: false,
         weekday: 'short', hour: '2-digit', minute: '2-digit'
       }).formatToParts(new Date()).forEach(function (p) { map[p.type] = p.value; });
-
-      var mins = (parseInt(map.hour, 10) % 24) * 60 + parseInt(map.minute, 10);
-      var weekday = map.weekday !== 'Sat' && map.weekday !== 'Sun';
-      return {
+      clock = {
         time: map.hour + ':' + map.minute,
-        open: weekday && mins >= market.open && mins < market.close
+        mins: (parseInt(map.hour, 10) % 24) * 60 + parseInt(map.minute, 10),
+        weekday: map.weekday !== 'Sat' && map.weekday !== 'Sun'
       };
     } catch (e) {
-      return { time: '--:--', open: false };
+      return { time: '--:--', open: false, nextOpen: null, source: 'none' };
     }
+
+    var live = marketSessions[market.id];
+    if (live && live.start && live.end) {
+      var now = Date.now();
+      var open = now >= live.start * 1000 && now < live.end * 1000;
+      var nextOpen = null;
+      if (!open && now < live.start * 1000) {
+        var today = fmtInTz(now, market.tz, { day: '2-digit', month: '2-digit' });
+        var onDay = fmtInTz(live.start * 1000, market.tz, { day: '2-digit', month: '2-digit' });
+        var at = fmtInTz(live.start * 1000, market.tz, { hour: '2-digit', minute: '2-digit' });
+        nextOpen = (onDay === today ? '' :
+          fmtInTz(live.start * 1000, market.tz, { weekday: 'short' }).toUpperCase() + ' ') + at;
+      }
+      return { time: clock.time, open: open, nextOpen: nextOpen, source: 'exchange' };
+    }
+
+    return {
+      time: clock.time,
+      open: clock.weekday && clock.mins >= market.open && clock.mins < market.close,
+      nextOpen: null,
+      source: 'schedule'
+    };
   }
 
   function openMarkets() {
@@ -911,7 +976,8 @@
     var now = sessionOf(market);
     el.marketStatus.className = 'market-status' + (now.open ? ' open' : '');
     el.marketText.textContent = market.label.toUpperCase() + ' · ' +
-                                (now.open ? now.time : 'CLOSED ' + now.time);
+      (now.open ? now.time
+                : 'CLOSED' + (now.nextOpen ? ' · OPENS ' + now.nextOpen : ' ' + now.time));
   }
 
   /* --------------------------------------------------------------- toast -- */
@@ -1057,6 +1123,17 @@
     buildMarketList();
     cursor.market = Math.max(0, MARKETS.map(function (m) { return m.id; }).indexOf(state.market));
     applyCursor();
+
+    /* Ask each exchange we have not heard from for its own session window, so
+       every row is holiday-accurate rather than guessed from a fixed schedule.
+       One request per market, cached for the rest of the session. */
+    if (liveActive()) {
+      MARKETS.forEach(function (m) {
+        if (marketSessions[m.id]) return;
+        var probe = (state.watchlists[m.id] || defaultsFor(m.id))[0];
+        if (probe) getSeries(probe, 0);
+      });
+    }
   }
 
   function openSearch() {
